@@ -1,82 +1,102 @@
 ﻿using CacheEducation.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace CacheEducation.Services.Author
 {
     public class AuthorService : IAuthorService
     {
         private readonly ApplicationContext _context;
+        private readonly IMemoryCache _memoryCache;
         
-        public AuthorService(ApplicationContext context)
+        public AuthorService(ApplicationContext context, IMemoryCache memoryCache)
         {
             _context = context;
+            _memoryCache = memoryCache;
         }
 
-        public async Task Initialize()
+        public void Initialize()
         {
             if (!_context.Author.Any())
-            {
-                try
+            {               
+                var book = new Models.Book
                 {
-                    var book = new Models.Book
-                    {
-                        Title = "English 1-4",
-                        YearOfRelease = 2002,
-                    };
-                    await _context.Book.AddAsync(book);
-                    await _context.SaveChangesAsync();
+                    Title = "English 1-4",
+                    YearOfRelease = 2002,
+                };
+                _context.Book.Add(book);               
 
-                    var country = new Models.Country
-                    {
-                        Name = "Russia"
-                    };
-                    await _context.Country.AddAsync(country);
-                    await _context.SaveChangesAsync();
-
-                    var author = new Models.Author
-                    {
-                        FirstName = "Ivan",
-                        SecondName = "Ivanov",
-                        YearOfBirth = 1972,
-                        Country = country,
-                    };
-                    author.BookAuthor = new List<Models.BookAuthor>
-                    {
-                        new Models.BookAuthor
-                        {
-                            Author = author,
-                            Book = book,
-                        }
-                    };
-
-                    await _context.Author.AddAsync(author);
-                    await _context.SaveChangesAsync();
-                }
-                catch (Exception ex)
+                var country = new Models.Country
                 {
-                    Console.WriteLine(ex.Message);
-                }
-                
+                    Name = "Russia"
+                };
+                _context.Country.Add(country);                
+
+                var author = new Models.Author
+                {
+                    FirstName = "Ivan",
+                    SecondName = "Ivanov",
+                    YearOfBirth = 1972,
+                    Country = country,
+                };
+                author.BookAuthor = new List<Models.BookAuthor>
+                {
+                    new Models.BookAuthor
+                    {
+                        Author = author,
+                        Book = book,
+                    }
+                };
+
+                _context.Author.Add(author);
+                _context.SaveChanges();                
             }
         }
 
-        public Task AddAsync(Models.Author entity)
+        public async Task AddAsync(Models.Author entity)
         {
-            throw new NotImplementedException();
+            await _context.Author.AddAsync(entity);
+            var res = await _context.SaveChangesAsync();
+            if(res > 0)
+            {
+                _memoryCache.Set(entity.Id, entity,
+                    new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) });
+            }
         }
 
-        public Task<IEnumerable<Models.Author>> GetAllAsync()
+        public async Task<IEnumerable<Models.Author>> GetAllAsync()
         {
-            throw new NotImplementedException();
+            if(!_memoryCache.TryGetValue("allUsers", out IEnumerable<Models.Author> authors))
+            {
+                authors =  await _context.Author.AsNoTracking().ToListAsync();                
+                if (authors.Any())
+                {
+                    _memoryCache.Set("allUsers", authors,
+                       new MemoryCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromMinutes(5)));
+                }                
+            }
+            return authors;
         }
 
-        public Task<Models.Author> GetRecordByIdAsync(int id)
-        {
-            throw new NotImplementedException();
+        public async Task<Models.Author> GetRecordByIdAsync(int id)
+        {            
+            if(!_memoryCache.TryGetValue(id, out Models.Author author))
+            {
+                author = await _context.Author.AsNoTracking().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == id);
+                if(author != null)
+                {
+                    _memoryCache.Set(author.Id, author,
+                        new MemoryCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromMinutes(5)));
+                }
+            }
+            return author;
         }
 
-        public Task<Models.Author> GetTheYoungestAsync()
+
+        public async Task<Models.Author> GetTheYoungestAsync()
         {
-            throw new NotImplementedException();
+            var youngestAuthor = await _context.Author.OrderBy(x => x.YearOfBirth).FirstOrDefaultAsync();
+            return youngestAuthor;           
         }
 
         
